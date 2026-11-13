@@ -151,11 +151,18 @@ def claude_turn(cid, request):
     rc, out, err = run(cmd, project, CLAUDE_TIMEOUT, prompt)
     try:
         reply = json.loads(out)
-        text, session = reply.get("result") or "(no reply)", reply.get("session_id", session)
     except json.JSONDecodeError:
+        reply = {}
+    text = reply.get("result") or ""
+    if reply and not reply.get("is_error"):
+        text, session = text or "(no reply)", reply.get("session_id", session)
+    else:  # a signed-out CLI still prints JSON, with is_error set
         CACHE["claude_at"] = 0  # re-check: a failed call is often a signed-out CLI
-        text = ("Claude isn't connected. Click Connect at the bottom left, sign in, then send again."
-                if not claude_status()["connected"] else f"The Claude call failed.\n{(err or out)[-800:]}")
+        if not claude_status()["connected"]:
+            text = "Claude isn't connected. Click Connect at the bottom left, sign in, then send again."
+        else:
+            session = reply.get("session_id", session)
+            text = f"The Claude call failed.\n{(text or err or out)[-800:]}"
     msg = {"role": "assistant", "text": text, **({"by": "claude"} if direct else {})}
     if plan.exists():
         try:

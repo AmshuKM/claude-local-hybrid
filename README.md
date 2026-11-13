@@ -6,8 +6,9 @@ Claude writes the tests and a plan of small tasks. A local Ollama model (through
 the edits, one task at a time, each in a fresh context. A task only counts as done when its
 check command passes, so the local model never has to drive tools or judge its own work.
 
-Built and tested on Windows with a GTX 1080 Ti (11 GB) and `qwen3.5:9b`. It also runs on macOS
-and Linux; those have not been tested yet.
+Built and tested on Windows with a GTX 1080 Ti (11 GB) and `qwen3.5:9b`. Also tested on Linux
+(Ubuntu 26.04, GNOME) with a GTX 1660 SUPER (6 GB) and `qwen3.5:4b`: the launcher, model setup,
+runs, Stop and the Claude sign-in window all work. macOS has not been tested yet.
 
 ## Requirements
 

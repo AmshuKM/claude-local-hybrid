@@ -25,3 +25,22 @@ def test_folder_inside_a_repo_gets_its_own(tmp_path):
     inner.mkdir()
     h.prepare_project(str(inner))
     assert (inner / ".git").exists()
+
+
+def test_signed_out_reply_says_connect(tmp_path, monkeypatch):
+    # a signed-out claude CLI prints valid JSON with is_error set, not garbage
+    subprocess.run(["git", "init", "-q", str(tmp_path)], check=True)
+    h.prepare_project(str(tmp_path))
+    real_run = h.run
+    out = '{"is_error": true, "result": "Failed to authenticate", "session_id": "dead"}'
+    monkeypatch.setattr(h, "run", lambda cmd, *a, **k:
+                        (1, out, "") if cmd[0] == "claude" else real_run(cmd, *a, **k))
+    monkeypatch.setattr(h, "claude_status", lambda: {"installed": True, "connected": False, "plan": None})
+    monkeypatch.setattr(h, "PLANS", tmp_path / "plans")
+    monkeypatch.setattr(h, "save", lambda: None)
+    h.S["chats"]["c1"] = {"id": "c1", "title": "t", "project": str(tmp_path),
+                          "session": None, "busy": "Claude", "messages": []}
+    h.claude_turn("c1", ("hi", False))
+    chat = h.S["chats"].pop("c1")
+    assert "Click Connect" in chat["messages"][-1]["text"]
+    assert chat["session"] is None and chat["busy"] is False
