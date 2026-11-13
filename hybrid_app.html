@@ -1,0 +1,315 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Hybrid</title>
+<style>
+  :root {
+    --page: #f7f6f3; --side: #efede8; --card: #ffffff; --text: #1f1e1c; --muted: #6b6963;
+    --line: #dcd9d2; --hover: #e6e3dc; --accent: #2f6fd0; --brand: #c2603c; --on-brand: #ffffff;
+    --ok: #2e7d32; --bad: #b3261e; --bubble: #e9e6df;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --page: #1c1b19; --side: #232220; --card: #2a2927; --text: #ecebe7; --muted: #a3a099;
+      --line: #3a3835; --hover: #33312e; --accent: #7fb0f5; --brand: #d97b57; --on-brand: #1c1b19;
+      --ok: #81c784; --bad: #f2867f; --bubble: #33312e;
+    }
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; margin: 0; }
+  body { background: var(--page); color: var(--text); font: 15px/1.5 system-ui, "Segoe UI", sans-serif;
+         display: grid; grid-template-columns: 250px minmax(0, 1fr); }
+  button { font: inherit; color: inherit; background: transparent; border: 1px solid var(--line);
+           border-radius: 8px; padding: 6px 12px; cursor: pointer; }
+  button:hover { background: var(--hover); }
+  button:focus-visible, textarea:focus-visible, .chat:focus-visible, .row:focus-visible {
+    outline: 2px solid var(--accent); outline-offset: 2px; }
+
+  aside { background: var(--side); border-right: 1px solid var(--line); display: flex;
+          flex-direction: column; min-height: 0; padding: 12px; }
+  #new { width: 100%; }
+  #chats { flex: 1; overflow-y: auto; margin-top: 8px; }
+  .project { font-size: 12px; color: var(--muted); margin: 14px 0 4px; overflow-wrap: anywhere; }
+  .chat { display: block; width: 100%; text-align: left; border: 0; padding: 6px 8px;
+          white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .chat[aria-current="true"] { background: var(--hover); }
+  #status { border-top: 1px solid var(--line); padding-top: 10px; font-size: 12px; color: var(--muted); }
+
+  main { display: flex; flex-direction: column; min-height: 0; height: 100vh; }
+  #thread { flex: 1; overflow-y: auto; padding: 24px 16px; }
+  .col { max-width: 760px; margin: 0 auto; display: flex; flex-direction: column; gap: 16px; }
+  .user { align-self: flex-end; max-width: 85%; background: var(--bubble); border-radius: 14px;
+          padding: 8px 14px; white-space: pre-wrap; overflow-wrap: anywhere; }
+  .claude { font-family: Georgia, "Times New Roman", serif; font-size: 16px; line-height: 1.6;
+            white-space: pre-wrap; overflow-wrap: anywhere; }
+  .muted { color: var(--muted); }
+  .empty { text-align: center; margin-top: 18vh; }
+  .empty h1 { font-size: 22px; font-weight: 500; margin: 0 0 6px; }
+
+  .plan { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; }
+  .plan header { display: flex; justify-content: space-between; gap: 12px; margin-bottom: 6px; }
+  .plan header strong { font-weight: 500; }
+  .row { display: grid; grid-template-columns: 22px minmax(0, 1fr) auto; gap: 6px; align-items: baseline;
+         width: 100%; text-align: left; border: 0; border-radius: 6px; padding: 4px 6px; }
+  .row .mid { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .row .sum { color: var(--muted); font-size: 13px; margin-left: 8px; }
+  .row .right { font-size: 12px; color: var(--muted); white-space: nowrap; }
+  .passed .mark { color: var(--ok); } .failed .mark, .failed .right { color: var(--bad); }
+  .running .mark, .running .right { color: var(--accent); }
+  .detail { margin: 4px 0 8px 28px; padding: 10px; background: var(--page); border: 1px solid var(--line);
+            border-radius: 8px; font: 12px/1.45 Consolas, monospace; white-space: pre-wrap;
+            overflow-wrap: anywhere; max-height: 320px; overflow-y: auto; }
+  .actions { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-top: 10px; }
+  .note { font-size: 12px; color: var(--muted); }
+
+  #composer { padding: 0 16px 16px; }
+  #box { max-width: 760px; margin: 0 auto; position: relative; background: var(--card);
+         border: 1px solid var(--line); border-radius: 14px; padding: 8px; }
+  #chips { display: flex; flex-wrap: wrap; gap: 6px; }
+  .chip { font-size: 12px; background: var(--bubble); border-radius: 999px; padding: 2px 4px 2px 10px;
+          display: inline-flex; align-items: center; gap: 2px; margin-bottom: 6px; }
+  .chip button { border: 0; padding: 0 6px; border-radius: 999px; }
+  #line { display: flex; align-items: flex-end; gap: 6px; }
+  textarea { flex: 1; resize: none; border: 0; background: transparent; color: inherit; font: inherit;
+             padding: 6px; max-height: 180px; }
+  .icon { width: 36px; height: 36px; padding: 0; display: grid; place-items: center; flex: none; }
+  #mode { height: 36px; font-size: 13px; flex: none; }
+  #mode[aria-pressed="true"] { border-color: var(--accent); color: var(--accent); }
+  #send { background: var(--brand); color: var(--on-brand); border-color: transparent; }
+  #send:hover { filter: brightness(1.08); }
+  #menu { position: absolute; bottom: 52px; left: 8px; width: 260px; max-height: 300px; overflow-y: auto;
+          background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 6px; z-index: 5; }
+  #menu button { display: block; width: 100%; text-align: left; border: 0; padding: 6px 8px; }
+  #menu .label { font-size: 12px; color: var(--muted); padding: 8px 8px 2px; }
+  #error { max-width: 760px; margin: 0 auto 6px; color: var(--bad); font-size: 13px; min-height: 1em; }
+  [hidden] { display: none !important; }
+
+  @media (max-width: 720px) {
+    body { grid-template-columns: minmax(0, 1fr); grid-template-rows: auto minmax(0, 1fr); }
+    aside { border-right: 0; border-bottom: 1px solid var(--line); max-height: 34vh; }
+    main { height: auto; min-height: 0; }
+  }
+</style>
+</head>
+<body>
+<aside>
+  <button id="new">New chat</button>
+  <nav id="chats" aria-label="Chats"></nav>
+  <div id="status" aria-live="polite"></div>
+</aside>
+<main>
+  <div id="thread"><div class="col" id="col"></div></div>
+  <div id="composer">
+    <div id="error" role="alert"></div>
+    <div id="box">
+      <div id="menu" hidden></div>
+      <div id="chips"></div>
+      <div id="line">
+        <button class="icon" id="attach" aria-label="Attach files, photos or plugins" aria-expanded="false">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12.5l-8.5 8.5a5.5 5.5 0 0 1-7.8-7.8l9-9a3.7 3.7 0 0 1 5.2 5.2l-9 9a1.8 1.8 0 0 1-2.6-2.6l8.3-8.3"/></svg>
+        </button>
+        <textarea id="input" rows="1" aria-label="Message" placeholder="Describe what to build or change"></textarea>
+        <button id="mode" aria-pressed="false" title="Switch between Claude (online, plans and edits) and the local model (offline, chat only)">Claude</button>
+        <button class="icon" id="send" aria-label="Send">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 19V5M5 12l7-7 7 7"/></svg>
+        </button>
+      </div>
+      <input type="file" id="file" multiple hidden>
+    </div>
+  </div>
+</main>
+<script>
+const $ = id => document.getElementById(id);
+const MARK = { passed: "✓", failed: "✕", skipped: "–", running: "↻", waiting: "·" };
+
+function h(tag, props, ...kids) {
+  const e = document.createElement(tag);
+  for (const [k, v] of Object.entries(props || {})) {
+    if (k === "class") e.className = v;
+    else if (k.startsWith("on")) e.addEventListener(k.slice(2), v);
+    else if (v !== false && v != null) e.setAttribute(k, v);
+  }
+  for (const kid of kids.flat()) if (kid != null && kid !== false) e.append(kid);
+  return e;
+}
+
+async function api(path, body) {
+  const opts = body === undefined ? {} : body instanceof Blob ? { method: "POST", body }
+    : { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) };
+  const r = await fetch(path, opts);
+  const j = await r.json();
+  if (!r.ok) throw new Error(j.error || r.statusText);
+  return j;
+}
+
+let cur = null, state = null, lastJson = "", lastCount = -1;
+let files = [], plugins = [], pluginList = null;
+const details = {};   // "plan|task" -> text, for rows the user opened
+let local = false;    // true: the local model answers (offline, chat only)
+try { cur = localStorage.getItem("chat"); local = localStorage.getItem("local") === "1"; } catch (e) {}
+
+function setMode(on) {
+  local = on;
+  try { localStorage.setItem("local", on ? "1" : "0"); } catch (e) {}
+  $("mode").textContent = on ? "Local" : "Claude";
+  $("mode").setAttribute("aria-pressed", on);
+  $("input").placeholder = on ? "Ask the local model (offline, chat only)" : "Describe what to build or change";
+}
+
+function fail(e) { $("error").textContent = e ? (e.message || String(e)) : ""; }
+function act(fn) { return async (...a) => { fail(); try { await fn(...a); await poll(); } catch (e) { fail(e); } }; }
+
+function select(id) {
+  cur = id; lastJson = ""; lastCount = -1; files = []; plugins = []; chips();
+  try { localStorage.setItem("chat", id); } catch (e) {}
+}
+
+const newChat = act(async () => {
+  const { path } = await api("/api/pick-folder", {});
+  if (!path) return;
+  select((await api("/api/new", { project: path })).id);
+  $("input").focus();
+});
+
+const send = act(async () => {
+  if (!cur) throw new Error("Start a chat first: New chat, then pick a project folder");
+  const text = $("input").value;
+  await api("/api/chat", { chat: cur, text, files, plugins, local });
+  $("input").value = ""; grow(); files = []; plugins = []; chips();
+});
+
+function chips() {
+  $("chips").replaceChildren(
+    ...files.map((f, i) => chip(f.name, () => { files.splice(i, 1); chips(); })),
+    ...plugins.map((p, i) => chip("plugin: " + p, () => { plugins.splice(i, 1); chips(); })));
+}
+function chip(label, remove) {
+  return h("span", { class: "chip" }, label,
+    h("button", { "aria-label": "Remove " + label, onclick: remove }, "×"));
+}
+
+async function toggleMenu() {
+  const menu = $("menu"), open = menu.hidden;
+  menu.hidden = !open; $("attach").setAttribute("aria-expanded", open);
+  if (!open) return;
+  menu.replaceChildren(
+    h("button", { onclick: () => { toggleMenu(); $("file").click(); } }, "Files and photos"),
+    h("div", { class: "label" }, pluginList ? "Plugins" : "Loading plugins…"));
+  if (!pluginList) { try { pluginList = await api("/api/plugins"); } catch (e) { pluginList = []; } }
+  if (menu.hidden) return;
+  menu.lastChild.textContent = pluginList.length ? "Plugins" : "No plugins installed";
+  menu.append(...pluginList.map(p => h("button", { onclick: () => {
+    if (!plugins.includes(p)) plugins.push(p);
+    chips(); toggleMenu(); $("input").focus();
+  } }, p)));
+}
+
+const upload = act(async () => {
+  if (!cur) throw new Error("Start a chat first: New chat, then pick a project folder");
+  for (const f of $("file").files) {
+    files.push(await api(`/api/upload?chat=${cur}&name=${encodeURIComponent(f.name)}`, f));
+    chips();
+  }
+  $("file").value = "";
+});
+
+async function toggleDetail(plan, id) {
+  const key = plan + "|" + id;
+  if (key in details) delete details[key];
+  else {
+    try { details[key] = (await api(`/api/task?plan=${encodeURIComponent(plan)}&id=${encodeURIComponent(id)}`)).text; }
+    catch (e) { return fail(new Error("Nothing is recorded for this task until it finishes")); }
+    fail();
+  }
+  lastJson = ""; render();
+}
+
+function planCard(p) {
+  const done = p.tasks.filter(t => t.status === "passed").length;
+  const failed = p.tasks.some(t => t.status === "failed" || t.status === "skipped");
+  const label = { ready: "Ready to run", running: `Running on your GPU, ${done} of ${p.tasks.length} done`,
+                  done: `${done} of ${p.tasks.length} passed`, stopped: "Stopped" }[p.state];
+  const rows = p.tasks.flatMap(t => {
+    const key = p.path + "|" + t.id;
+    const right = t.status === "waiting" ? "waiting" : t.status === "running" ? "running"
+      : t.status === "skipped" ? "skipped" : `${t.status}, ${t.seconds} s` + (t.attempts > 1 ? `, ${t.attempts} tries` : "");
+    return [
+      h("button", { class: "row " + t.status, "aria-expanded": key in details, onclick: () => toggleDetail(p.path, t.id) },
+        h("span", { class: "mark", "aria-hidden": "true" }, MARK[t.status]),
+        h("span", { class: "mid" }, t.id, h("span", { class: "sum" }, t.summary)),
+        h("span", { class: "right" }, right)),
+      key in details && h("div", { class: "detail" }, details[key])];
+  });
+  const actions = [];
+  if (p.state === "ready") actions.push(state.running
+    ? h("span", { class: "note" }, "Another run is using the GPU")
+    : h("button", { onclick: act(() => api("/api/run", { chat: cur, plan: p.path })) }, "Run on your GPU"));
+  if (p.state === "running") actions.push(h("button", { onclick: act(() => api("/api/stop", {})) }, "Stop"));
+  if ((p.state === "done" || p.state === "stopped") && (failed || p.state === "stopped") && !state.chat.busy)
+    actions.push(h("button", { onclick: act(() => api("/api/chat", { chat: cur, fix: p.path })) }, "Ask Claude to fix failures"));
+  if (p.branch && p.state !== "running") actions.push(h("span", { class: "note" }, "Changes are on branch " + p.branch));
+  return h("section", { class: "plan", "aria-label": "Plan" },
+    h("header", {}, h("strong", {}, `Plan: ${p.tasks.length} ${p.tasks.length === 1 ? "task" : "tasks"}`), h("span", { class: "note" }, label)),
+    rows, h("div", { class: "actions" }, actions));
+}
+
+function render() {
+  const json = JSON.stringify([state, Object.keys(details)]);
+  if (json === lastJson) return;
+  lastJson = json;
+
+  const groups = {};
+  for (const c of state.chats) (groups[c.project] = groups[c.project] || []).push(c);
+  $("chats").replaceChildren(...Object.entries(groups).flatMap(([project, list]) => [
+    h("div", { class: "project", title: project }, project.split(/[\\/]/).pop() || project),
+    ...list.map(c => h("button", { class: "chat", "aria-current": c.id === cur, onclick: () => { select(c.id); poll(); } }, c.title))]));
+  $("status").replaceChildren(
+    h("div", {}, "Local model: " + state.status.model),
+    h("div", {}, "GPU memory: " + state.status.gpu));
+
+  const chat = state.chat, col = $("col");
+  if (!chat) {
+    col.replaceChildren(h("div", { class: "empty" },
+      h("h1", {}, "Plan with Claude, build on your GPU"),
+      h("p", { class: "muted" }, "Pick a project folder to start. Claude writes the tests and a plan, and your local model does the coding."),
+      h("button", { onclick: newChat }, "Pick a project folder")));
+    return;
+  }
+  const kids = chat.messages.flatMap(m => m.role === "user"
+    ? [h("div", { class: "user" }, m.text,
+        (m.files.length || m.plugins.length) ? h("div", { class: "note" }, [...m.files, ...m.plugins.map(p => "plugin: " + p)].join(", ")) : null)]
+    : [m.by === "local" && h("div", { class: "note" }, "Local model"),
+       h("div", { class: "claude" }, m.text), m.plan && planCard(m.plan)]);
+  if (!chat.messages.length) kids.push(h("p", { class: "muted" }, "Project: " + chat.project + ". Describe what you want built or changed."));
+  if (chat.busy) kids.push(h("div", { class: "muted" }, chat.busy + " is thinking…"));
+  col.replaceChildren(...kids.filter(Boolean));
+  const count = chat.messages.length + (chat.busy ? 1 : 0);
+  if (count !== lastCount) { lastCount = count; $("thread").scrollTop = $("thread").scrollHeight; }
+}
+
+async function poll() {
+  try {
+    state = await api("/api/state" + (cur ? "?chat=" + cur : ""));
+    if (cur && !state.chat) cur = null;
+    render();
+  } catch (e) { fail(new Error("Can't reach the app server. Is hybrid_app.py still running?")); }
+}
+
+function grow() { const t = $("input"); t.style.height = "auto"; t.style.height = Math.min(t.scrollHeight, 180) + "px"; }
+
+$("new").addEventListener("click", newChat);
+$("send").addEventListener("click", send);
+$("attach").addEventListener("click", toggleMenu);
+$("mode").addEventListener("click", () => setMode(!local));
+setMode(local);
+$("file").addEventListener("change", upload);
+$("input").addEventListener("input", grow);
+$("input").addEventListener("keydown", e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send(); } });
+document.addEventListener("keydown", e => { if (e.key === "Escape" && !$("menu").hidden) { toggleMenu(); $("attach").focus(); } });
+poll();
+setInterval(poll, 1500);
+</script>
+</body>
+</html>

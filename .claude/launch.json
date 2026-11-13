@@ -1,0 +1,11 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "hybrid-app",
+      "runtimeExecutable": "uv",
+      "runtimeArgs": ["run", "--python", "3.12", "hybrid_app.py"],
+      "port": 8765
+    }
+  ]
+}

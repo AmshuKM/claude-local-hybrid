@@ -1,0 +1,7 @@
+# private: chats, uploads, plans and run logs
+hybrid-data/
+# separate experiments and projects, not part of the app
+spike/
+typing-practice/
+__pycache__/
+.aider*
