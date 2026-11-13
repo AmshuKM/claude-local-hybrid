@@ -10,18 +10,22 @@ Built and tested on Windows with a GTX 1080 Ti (11 GB) and `qwen3.5:9b`.
 
 ## Requirements
 
-- [Ollama](https://ollama.com) with a coding model pulled (`ollama pull qwen3.5:9b`)
+- [Ollama](https://ollama.com), running (the app's first-run setup picks and downloads a model)
 - [uv](https://docs.astral.sh/uv/) and git
 - aider: `uv tool install --python 3.12 aider-chat`
 - [Claude Code](https://claude.com/claude-code), signed in (used for planning; not needed to run plans)
 
 ## The app
 
+Double-click **Start Hybrid.bat**, or run:
+
 ```
 uv run --python 3.12 hybrid_app.py
 ```
 
-Open http://127.0.0.1:8765, start a chat, pick a project folder and describe what you want.
+Open http://127.0.0.1:8765. On first start the app checks your graphics card and recommends a
+local model (downloading it if needed); change it later with **Change** next to the model name.
+Then start a chat, pick a project folder and describe what you want.
 
 - Claude replies with a plan card. Press **Run on your GPU** to execute it locally.
 - Click a task to see its check output and code changes.

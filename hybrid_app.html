@@ -118,6 +118,24 @@
   #error:empty { display: none; }
   [hidden] { display: none !important; }
 
+  .setup { margin: 10vh auto 0; max-width: 520px; width: 100%; }
+  .setup h1 { font-size: 22px; font-weight: 500; letter-spacing: -0.01em; margin: 0 0 8px; text-wrap: balance; }
+  .setup > p { color: var(--muted); margin: 0 0 18px; text-wrap: pretty; }
+  .choices { display: flex; flex-direction: column; gap: 8px; border: 0; padding: 0; margin: 0 0 18px; }
+  .choice { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 2px 12px; align-items: start;
+            background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; cursor: pointer; }
+  .choice:has(input:checked) { border-color: var(--brand); }
+  .choice input { margin: 4px 0 0; accent-color: var(--brand); grid-row: span 2; }
+  .choice strong { font-weight: 500; }
+  .choice .tag { font-size: 12px; color: var(--brand); margin-left: 8px; }
+  .choice .note { grid-column: 2; }
+  .setup .actions { padding: 0; }
+  a.button { color: inherit; text-decoration: none; border: 1px solid var(--line); border-radius: 8px; padding: 6px 12px; }
+  a.button:hover { background: var(--hover); }
+  progress { width: 100%; height: 8px; accent-color: var(--brand); margin: 4px 0 8px; }
+  .bad { color: var(--bad); font-size: 13px; margin: 0 0 12px; }
+  #status .change { border: 0; padding: 0 0 0 6px; font-size: 12px; color: var(--accent); }
+
   @media (max-width: 720px) {
     body { grid-template-columns: minmax(0, 1fr); grid-template-rows: auto minmax(0, 1fr); }
     aside { border-right: 0; border-bottom: 1px solid var(--line); max-height: 32vh; padding: 10px 12px; }
@@ -285,6 +303,56 @@ async function toggleDetail(plan, id) {
   lastJson = ""; render();
 }
 
+// First-run setup: pick the local model. setup is /api/setup, loaded only while the screen shows.
+let setup = null, setupOpen = false, pick = null;
+const gb = bytes => (bytes / 1e9).toFixed(1);
+function openSetup() { setupOpen = true; setup = null; pick = null; poll(); }
+function closeSetup() { setupOpen = false; setup = null; pick = null; lastJson = ""; }
+
+const chooseModel = act(async () => {
+  setup = await api("/api/setup", { model: pick });
+  if (setup.done && setup.model === pick && !setup.pull.model) closeSetup();  // was already installed
+});
+
+function setupScreen() {
+  const s = setup, col = $("col");
+  if (!s) return col.replaceChildren(h("div", { class: "setup thinking" }, icon("running"), "Checking your computer…"));
+  if (!s.ollama) return col.replaceChildren(h("div", { class: "setup" },
+    h("h1", {}, "One thing to install first"),
+    h("p", {}, "This app runs AI on your own computer with a free program called Ollama. Install it, open it once, then come back here."),
+    h("div", { class: "actions" },
+      h("a", { class: "button", href: "https://ollama.com/download", target: "_blank", rel: "noopener" }, "Get Ollama"),
+      h("button", { class: "primary", onclick: act(async () => { setup = await api("/api/setup"); }) }, "Check again"))));
+  const p = s.pull;
+  if (p.model && !p.error) return col.replaceChildren(h("div", { class: "setup", "aria-live": "polite" },
+    h("h1", {}, "Downloading " + p.model),
+    h("p", {}, "This happens once. You can leave this page open and do something else."),
+    h("progress", { max: p.total || 1, value: p.done }),
+    h("p", { class: "note" }, p.total ? `${gb(p.done)} of ${gb(p.total)} GB` : "Starting…")));
+
+  const choice = c => {
+    const have = s.installed.includes(c.model);
+    return h("label", { class: "choice" },
+      h("input", { type: "radio", name: "model", value: c.model, checked: c.model === pick,
+                   onchange: () => { pick = c.model; lastJson = ""; render(); document.querySelector("input[name=model]:checked").focus(); } }),
+      h("span", {}, h("strong", {}, c.model), c.model === s.recommended && h("span", { class: "tag" }, "Recommended")),
+      h("span", { class: "note" }, c.note + " " + (have ? "Already on this computer." : `Download: about ${c.gb} GB.`)));
+  };
+  const chosen = s.choices.find(c => c.model === pick);
+  const have = s.installed.includes(pick);
+  col.replaceChildren(h("div", { class: "setup" },
+    h("h1", {}, s.done ? "Change the AI on your computer" : "Choose the AI that runs on your computer"),
+    h("p", {}, s.gpu
+      ? `We found your graphics card: ${s.gpu.name} with ${s.gpu.gb} GB of memory. We picked the model that fits it best.`
+      : "We didn't find an NVIDIA graphics card, so the AI will run on your processor. That works, but it is slower."),
+    h("fieldset", { class: "choices" }, h("legend", { hidden: true }, "Model"), s.choices.map(choice)),
+    p.error && h("p", { class: "bad", role: "alert" }, p.error),
+    h("div", { class: "actions" },
+      h("button", { class: "primary", onclick: chooseModel },
+        have ? "Use this one" : `Download and use (about ${chosen ? chosen.gb : "?"} GB)`),
+      s.done && h("button", { onclick: () => { closeSetup(); render(); } }, "Cancel"))));
+}
+
 function planCard(p) {
   const done = p.tasks.filter(t => t.status === "passed").length;
   const failed = p.tasks.some(t => t.status === "failed" || t.status === "skipped");
@@ -315,7 +383,7 @@ function planCard(p) {
 }
 
 function render() {
-  const json = JSON.stringify([state, Object.keys(details)]);
+  const json = JSON.stringify([state, Object.keys(details), setup, pick, setupOpen]);
   if (json === lastJson) return;
   lastJson = json;
 
@@ -325,8 +393,13 @@ function render() {
     h("div", { class: "project", title: project }, project.split(/[\\/]/).pop() || project),
     ...list.map(c => h("button", { class: "chat", "aria-current": c.id === cur, onclick: () => { select(c.id); poll(); } }, c.title))]));
   $("status").replaceChildren(
-    h("span", {}, "Local model"), h("span", {}, state.status.model),
+    h("span", {}, "Local model"), h("span", {}, state.model,
+      state.setup && !setupOpen && h("button", { class: "change", onclick: openSetup }, "Change")),
     h("span", {}, "GPU memory"), h("span", {}, state.status.gpu));
+
+  const inSetup = !state.setup || setupOpen;
+  $("composer").hidden = inSetup;
+  if (inSetup) return setupScreen();
 
   const chat = state.chat, col = $("col");
   if (!chat) {
@@ -353,6 +426,12 @@ async function poll() {
   try {
     state = await api("/api/state" + (cur ? "?chat=" + cur : ""));
     if (cur && !state.chat) cur = null;
+    if ((!state.setup || setupOpen) && (!setup || setup.pull.model)) {  // refresh while downloading
+      const s = await api("/api/setup");
+      if (setup && setup.pull.model && !s.pull.model && s.done) closeSetup();  // download finished
+      else { setup = s; pick = pick || s.recommended; }
+      state.setup = s.done; state.model = s.model;
+    }
     render();
   } catch (e) { fail(new Error("Can't reach the app server. Is hybrid_app.py still running?")); }
 }

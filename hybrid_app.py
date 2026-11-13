@@ -17,6 +17,14 @@ import runner
 HERE = Path(__file__).parent
 DATA = HERE / "hybrid-data"
 PLANS, UPLOADS, CHATS = DATA / "plans", DATA / "uploads", DATA / "chats.json"
+SETTINGS = DATA / "settings.json"  # {"model": ...}, written by the first-run setup
+OLLAMA = "http://127.0.0.1:11434"
+# Offered in the first-run setup, best first: (model, download GB, min GPU memory GB, plain-words note)
+CHOICES = [
+    ("qwen3.5:9b", 6.6, 8, "The best fit for graphics cards with 8 GB or more. Fast and reliable at small coding tasks."),
+    ("qwen3.5:4b", 3.4, 5, "For graphics cards with 5 to 8 GB. Smaller, so it makes more mistakes."),
+    ("qwen3.5:2b", 2.7, 0, "For small graphics cards or none. Fine for chat, weak at coding."),
+]
 PORT = 8765
 ALLOWED_HOSTS = {f"127.0.0.1:{PORT}", f"localhost:{PORT}"}
 CLAUDE_TIMEOUT = 1800  # seconds
@@ -27,7 +35,7 @@ S = {"chats": {}}   # persisted to CHATS
 RUN = {}            # the one active local run: proc, plan, project
 CACHE = {}          # status / plugin list
 
-SYSTEM = f"""You are the planning half of a hybrid coding app. A small local model (about 9B
+SYSTEM = f"""You are the planning half of a hybrid coding app. A small local model (2 to 9B
 parameters, running on the user's GPU through aider) makes the code edits. You plan, write
 the checks, and review results. The user talks to you through a chat UI.
 
@@ -35,7 +43,7 @@ When a request needs code changes in this project:
 1. Read what you need, then write or update the tests yourself. The local model must never
    write its own tests.
 2. Write a plan as JSON to the exact plan path given at the end of the user's message:
-   {{"model": "{runner.DEFAULT_MODEL}", "tasks": [{{"id": "short-id", "task": "precise instructions",
+   {{"model": "<the model named in the [app] line>", "tasks": [{{"id": "short-id", "task": "precise instructions",
    "files": ["file the model may edit"], "read": ["tests/test_x.py", "other context"],
    "check": "command that exits 0 only when the task is done", "needs": ["earlier-id"]}}]}}
    - Each task edits one or two files and is fully specified in its text: exact names,
@@ -137,7 +145,8 @@ def claude_turn(cid, request):
     if session:
         cmd += ["--resume", session]
     prompt += "\n\n" + (DIRECT_NOTE if direct
-                        else f"[app] Plan path for this turn, if a plan is needed: {plan}")
+                        else f"[app] Plan path for this turn, if a plan is needed: {plan}"
+                             f" Plan model: {chosen_model()}")
     rc, out, err = run(cmd, project, CLAUDE_TIMEOUT, prompt)
     try:
         reply = json.loads(out)
@@ -184,8 +193,8 @@ def local_turn(cid, files):
     system = ("You are a coding assistant running offline on the user's own GPU. You cannot read "
               f"or change files; the user's project folder is {chat['project']}. Answer briefly "
               "in plain text, because the UI does not render markdown.")
-    req = urllib.request.Request("http://127.0.0.1:11434/api/chat", json.dumps({
-        "model": runner.DEFAULT_MODEL, "stream": False, "think": False,  # no thinking: faster chat
+    req = urllib.request.Request(OLLAMA + "/api/chat", json.dumps({
+        "model": chosen_model(), "stream": False, "think": False,  # no thinking: faster chat
         "options": {"num_ctx": runner.NUM_CTX},  # same size as the runner, so no model reload
         "messages": [{"role": "system", "content": system}, *history]}).encode(),
         {"Content-Type": "application/json"})
@@ -260,6 +269,64 @@ def status():
     return CACHE["status"]
 
 
+PULL = {}  # the one model download in progress: model, done, total (bytes), error
+
+
+def chosen_model():
+    try:
+        return json.loads(SETTINGS.read_text(encoding="utf-8"))["model"]
+    except (OSError, ValueError, KeyError):
+        return runner.DEFAULT_MODEL
+
+
+def recommend(vram_gb):
+    """The best choice that fits in GPU memory; no NVIDIA GPU (None) gets the smallest."""
+    return next(m for m, _, need, _ in CHOICES if (vram_gb or 0) >= need)
+
+
+def ollama_models():
+    """Installed model names, or None when Ollama is not running."""
+    try:
+        with urllib.request.urlopen(OLLAMA + "/api/tags", timeout=5) as r:
+            return [m["name"] for m in json.load(r)["models"]]
+    except (OSError, KeyError, json.JSONDecodeError):
+        return None
+
+
+def setup_info():
+    _, out, _ = run(["nvidia-smi", "--query-gpu=name,memory.total",
+                     "--format=csv,noheader,nounits"], timeout=10)
+    m = re.match(r"\s*(.+?)\s*,\s*(\d+)", out)  # first GPU only
+    gpu = {"name": m[1], "gb": round(int(m[2]) / 1024)} if m else None
+    installed = ollama_models()
+    return {"done": SETTINGS.exists(), "model": chosen_model(), "ollama": installed is not None,
+            "installed": installed or [], "gpu": gpu, "recommended": recommend(gpu and gpu["gb"]),
+            "choices": [{"model": c[0], "gb": c[1], "note": c[3]} for c in CHOICES],
+            "pull": dict(PULL)}
+
+
+def save_model(model):
+    SETTINGS.write_text(json.dumps({"model": model}), encoding="utf-8")
+
+
+def pull(model):
+    req = urllib.request.Request(OLLAMA + "/api/pull", json.dumps({"model": model}).encode(),
+                                 {"Content-Type": "application/json"})
+    try:
+        with urllib.request.urlopen(req, timeout=120) as r:
+            for line in r:
+                msg = json.loads(line)
+                if "error" in msg:
+                    raise OSError(msg["error"])
+                # shortcut: shows the largest layer only (the weights, ~all of the size)
+                if msg.get("total", 0) >= PULL.get("total", 0):
+                    PULL.update(done=msg.get("completed", 0), total=msg.get("total", 0))
+        save_model(model)
+        PULL.clear()
+    except (OSError, ValueError) as e:
+        PULL.update(error=f"The download stopped: {e}. Check your internet connection and try again.")
+
+
 def plugins():
     if "plugins" not in CACHE:
         _, out, _ = run(["claude", "plugin", "list", "--json"], timeout=60)
@@ -326,7 +393,10 @@ class Handler(BaseHTTPRequestHandler):
                     chats = [{"id": c["id"], "title": c["title"], "project": c["project"]}
                              for c in S["chats"].values()]
                 running = bool(RUN) and RUN["proc"].poll() is None
-                self.send({"chats": chats, "chat": view, "status": status(), "running": running})
+                self.send({"chats": chats, "chat": view, "status": status(), "running": running,
+                           "setup": SETTINGS.exists(), "model": chosen_model()})
+            elif url.path == "/api/setup":
+                self.send(setup_info())
             elif url.path == "/api/plugins":
                 self.send(plugins())
             elif url.path == "/api/task":
@@ -421,6 +491,17 @@ class Handler(BaseHTTPRequestHandler):
                         [sys.executable, str(HERE / "runner.py"), plan],
                         cwd=project, stdout=out, stderr=subprocess.STDOUT))
                 self.send({"ok": True})
+            elif url.path == "/api/setup":
+                model, installed = body["model"], ollama_models() or []
+                if model not in installed + [c[0] for c in CHOICES]:
+                    raise ValueError("unknown model")
+                if model in installed:
+                    save_model(model)
+                elif not PULL.get("model") or PULL.get("error"):  # one download at a time
+                    PULL.clear()
+                    PULL.update(model=model, done=0, total=0)
+                    threading.Thread(target=pull, args=(model,), daemon=True).start()
+                self.send(setup_info())
             elif url.path == "/api/stop":
                 stop_run()
                 self.send({"ok": True})
