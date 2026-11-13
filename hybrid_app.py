@@ -40,8 +40,13 @@ When a request needs code changes in this project:
    "check": "command that exits 0 only when the task is done", "needs": ["earlier-id"]}}]}}
    - Each task edits one or two files and is fully specified in its text: exact names,
      signatures, behaviour, edge cases. Put the test file in "read".
+   - A task's check must be able to pass once that task and its "needs" are done. Never check
+     with a test file that imports code a later task writes: in JS ES modules (and Python) one
+     missing import fails the whole file, whatever test-name filter you add.
    - This machine runs Windows. For Python use checks like
-     `uv run --python 3.12 --with pytest pytest -q tests/test_x.py`.
+     `uv run --python 3.12 --with pytest pytest -q tests/test_x.py`. For Node use
+     `node --test tests/x.test.js` or a bare `node --test`; Node treats a directory argument
+     such as `tests/` as a file and always fails.
    - Prefer more, smaller tasks. Known weaknesses of the local model: it cannot count
      characters (give limits in words), it repeats a mistake even when shown the error, it
      falls into name collisions (a parameter that hides an import), and it skips
@@ -107,7 +112,9 @@ def changed(project):
 
 def prepare_project(project):
     """The runner needs a git repo with an identity and at least one commit."""
-    if git(project, "rev-parse", "--is-inside-work-tree")[0]:
+    rc, top = git(project, "rev-parse", "--show-toplevel")
+    # a folder inside another repo gets its own: runs must never branch or reset the outer one
+    if rc or Path(top).resolve() != Path(project).resolve():
         git(project, "init")
     if git(project, "config", "user.name")[0]:
         git(project, "config", "user.name", "hybrid-app")
