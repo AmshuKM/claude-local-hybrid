@@ -57,7 +57,20 @@ happened, fix what is yours to fix (a wrong test, unclear task wording), and wri
 revised plan containing only the tasks that have not passed, to the new plan path.
 
 If the request is a question or needs no code change, just answer and write no plan.
-You have no shell here."""
+You have no shell here.
+
+Every user message ends with an [app] line. Normally it gives the plan path. If it says
+"Direct mode", the user has chosen to have you edit the files yourself for that message:
+follow that line instead of the planning rules above."""
+
+
+# Sent with each message, not as a system prompt: a resumed session keeps its original system
+# prompt, so the mode has to travel with the message.
+DIRECT_NOTE = ("[app] Direct mode: for this message the user chose to have you make the change "
+               "yourself, overriding the planning rules. Edit the project files directly and add or "
+               "update tests for what you change. Do not write a plan. You cannot run anything "
+               "here, so say plainly what you did not run. Reply briefly in plain text: what you "
+               "changed and what the user should check.")
 
 
 def save():
@@ -103,7 +116,8 @@ def prepare_project(project):
         git(project, "commit", "--allow-empty", "-m", "Start")
 
 
-def claude_turn(cid, prompt):
+def claude_turn(cid, request):
+    prompt, direct = request  # direct: Claude edits the project itself instead of planning
     with LOCK:
         chat = S["chats"][cid]
         project, session = chat["project"], chat.get("session")
@@ -115,14 +129,15 @@ def claude_turn(cid, prompt):
            "--append-system-prompt", SYSTEM]
     if session:
         cmd += ["--resume", session]
-    rc, out, err = run(cmd, project, CLAUDE_TIMEOUT,
-                       f"{prompt}\n\n[app] Plan path for this turn, if a plan is needed: {plan}")
+    prompt += "\n\n" + (DIRECT_NOTE if direct
+                        else f"[app] Plan path for this turn, if a plan is needed: {plan}")
+    rc, out, err = run(cmd, project, CLAUDE_TIMEOUT, prompt)
     try:
         reply = json.loads(out)
         text, session = reply.get("result") or "(no reply)", reply.get("session_id", session)
     except json.JSONDecodeError:
         text = f"The Claude call failed.\n{(err or out)[-800:]}"
-    msg = {"role": "assistant", "text": text}
+    msg = {"role": "assistant", "text": text, **({"by": "claude"} if direct else {})}
     if plan.exists():
         try:
             runner.validate(json.loads(plan.read_text(encoding="utf-8")))
@@ -132,7 +147,7 @@ def claude_turn(cid, prompt):
     new = sorted(changed(project) - before)
     if new:  # commit what Claude wrote so the runner starts from a clean tree
         git(project, "add", "--", *new)
-        rc, out = git(project, "commit", "-m", f"Plan: {chat['title']}", "--", *new)
+        rc, out = git(project, "commit", "-m", f"{'Claude' if direct else 'Plan'}: {chat['title']}", "--", *new)
         if rc:
             msg["text"] += f"\n\n(Could not commit Claude's files: {out[-300:]})"
     with LOCK:
@@ -359,7 +374,11 @@ class Handler(BaseHTTPRequestHandler):
                         return self.send({"error": "Claude is still answering"}, 409)
                     files = [f for f in body.get("files", [])
                              if Path(f["path"]).resolve().parent == (UPLOADS / chat["id"]).resolve()]
-                    local = bool(body.get("local")) and not body.get("fix")
+                    # hybrid: Claude plans, the GPU codes. claude: Claude edits. local: offline chat.
+                    mode = "hybrid" if body.get("fix") else body.get("mode", "hybrid")
+                    if mode not in ("hybrid", "claude", "local"):
+                        raise ValueError("unknown mode")
+                    local = mode == "local"
                     chosen = [] if local else [p for p in body.get("plugins", []) if p in plugins()]
                     if body.get("fix"):
                         log = Path(self.own_plan(body["fix"])).with_suffix(".log.json")
@@ -380,7 +399,8 @@ class Handler(BaseHTTPRequestHandler):
                                              "files": [f["name"] for f in files]})
                     chat["busy"] = "Local model" if local else "Claude"  # shown as "... is thinking"
                     save()
-                args = (local_turn, chat["id"], files) if local else (claude_turn, chat["id"], prompt)
+                args = ((local_turn, chat["id"], files) if local
+                        else (claude_turn, chat["id"], (prompt, mode == "claude")))
                 threading.Thread(target=guarded, args=args, daemon=True).start()
                 self.send({"ok": True})
             elif url.path == "/api/run":

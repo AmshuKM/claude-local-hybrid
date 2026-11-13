@@ -27,8 +27,11 @@ Open http://127.0.0.1:8765, start a chat, pick a project folder and describe wha
 - Click a task to see its check output and code changes.
 - If tasks fail, **Ask Claude to fix failures** sends the log back for a revised plan.
 - The paperclip attaches files and photos, or tells Claude to use one of your plugins.
-- The **Claude / Local** switch sends a message to the local model instead. That works
-  offline, but it is chat only: the local model cannot read your project or make plans.
+- The **Hybrid / Claude / Local** switch picks who does the work for each message:
+  - **Hybrid** (default): Claude plans and writes the tests, your GPU writes the code.
+  - **Claude**: Claude makes the change itself, directly in the project.
+  - **Local**: the local model answers. That works offline, but it is chat only: the
+    local model cannot read your project or make plans.
 
 Work happens on a new `local-run/<timestamp>` branch in the project; a failed attempt is
 rolled back. The server listens on 127.0.0.1 only and rejects requests from other origins.
