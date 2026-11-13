@@ -135,6 +135,9 @@
   progress { width: 100%; height: 8px; accent-color: var(--brand); margin: 4px 0 8px; }
   .bad { color: var(--bad); font-size: 13px; margin: 0 0 12px; }
   #status .change { border: 0; padding: 0 0 0 6px; font-size: 12px; color: var(--accent); }
+  #status .ok { color: var(--ok); }
+  #status .connect { border: 0; padding: 0; font-size: 12px; color: var(--bad); text-decoration: none; text-align: left; }
+  #status .connect:hover { background: transparent; text-decoration: underline; }
 
   @media (max-width: 720px) {
     body { grid-template-columns: minmax(0, 1fr); grid-template-rows: auto minmax(0, 1fr); }
@@ -303,6 +306,9 @@ async function toggleDetail(plan, id) {
   lastJson = ""; render();
 }
 
+let loginStarted = false;  // a sign-in window is open; cleared once Claude reports connected
+const connectClaude = act(async () => { await api("/api/claude-login", {}); loginStarted = true; lastJson = ""; });
+
 // First-run setup: pick the local model. setup is /api/setup, loaded only while the screen shows.
 let setup = null, setupOpen = false, pick = null;
 const gb = bytes => (bytes / 1e9).toFixed(1);
@@ -383,7 +389,8 @@ function planCard(p) {
 }
 
 function render() {
-  const json = JSON.stringify([state, Object.keys(details), setup, pick, setupOpen]);
+  if (state.claude.connected) loginStarted = false;
+  const json = JSON.stringify([state, Object.keys(details), setup, pick, setupOpen, loginStarted]);
   if (json === lastJson) return;
   lastJson = json;
 
@@ -392,7 +399,15 @@ function render() {
   $("chats").replaceChildren(...Object.entries(groups).flatMap(([project, list]) => [
     h("div", { class: "project", title: project }, project.split(/[\\/]/).pop() || project),
     ...list.map(c => h("button", { class: "chat", "aria-current": c.id === cur, onclick: () => { select(c.id); poll(); } }, c.title))]));
+  const c = state.claude;
   $("status").replaceChildren(
+    h("span", {}, "Claude"), h("span", {}, c.connected
+      ? h("span", { class: "ok" }, "Connected" + (c.plan ? ` (${c.plan[0].toUpperCase() + c.plan.slice(1)})` : ""))
+      : !c.installed
+        ? h("a", { class: "connect", href: "https://claude.com/claude-code", target: "_blank", rel: "noopener" }, "Not installed · Get it")
+        : loginStarted
+          ? h("button", { class: "connect", onclick: connectClaude, title: "Open the sign-in window again" }, "Finish signing in, in the new window")
+          : h("button", { class: "connect", onclick: connectClaude }, "Not connected · Connect")),
     h("span", {}, "Local model"), h("span", {}, state.model,
       state.setup && !setupOpen && h("button", { class: "change", onclick: openSetup }, "Change")),
     h("span", {}, "GPU memory"), h("span", {}, state.status.gpu));

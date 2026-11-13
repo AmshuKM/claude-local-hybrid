@@ -7,7 +7,8 @@ runner.py executes the plan on the local Ollama model; results show in the chat.
 The server only listens on 127.0.0.1 and rejects requests from other web origins,
 because it can edit files and run commands in the projects you pick.
 """
-import base64, json, re, subprocess, sys, threading, time, urllib.request, uuid
+import base64, json, os, platform, re, shutil, signal, subprocess, sys, threading, time
+import urllib.request, uuid, webbrowser
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
@@ -51,7 +52,7 @@ When a request needs code changes in this project:
    - A task's check must be able to pass once that task and its "needs" are done. Never check
      with a test file that imports code a later task writes: in JS ES modules (and Python) one
      missing import fails the whole file, whatever test-name filter you add.
-   - This machine runs Windows. For Python use checks like
+   - This machine runs {platform.system()}. For Python use checks like
      `uv run --python 3.12 --with pytest pytest -q tests/test_x.py`. For Node use
      `node --test tests/x.test.js` or a bare `node --test`; Node treats a directory argument
      such as `tests/` as a file and always fails.
@@ -152,7 +153,9 @@ def claude_turn(cid, request):
         reply = json.loads(out)
         text, session = reply.get("result") or "(no reply)", reply.get("session_id", session)
     except json.JSONDecodeError:
-        text = f"The Claude call failed.\n{(err or out)[-800:]}"
+        CACHE["claude_at"] = 0  # re-check: a failed call is often a signed-out CLI
+        text = ("Claude isn't connected. Click Connect at the bottom left, sign in, then send again."
+                if not claude_status()["connected"] else f"The Claude call failed.\n{(err or out)[-800:]}")
     msg = {"role": "assistant", "text": text, **({"by": "claude"} if direct else {})}
     if plan.exists():
         try:
@@ -269,6 +272,39 @@ def status():
     return CACHE["status"]
 
 
+def claude_status():
+    """Is the claude CLI installed and signed in? Cached: the check takes about a second."""
+    ttl = 3 if time.time() - CACHE.get("login_at", 0) < 300 else 30  # check often while signing in
+    if time.time() - CACHE.get("claude_at", 0) > ttl:
+        rc, out, _ = run(["claude", "auth", "status", "--json"], timeout=20)
+        try:
+            j = json.loads(out)
+            st = {"installed": True, "connected": bool(j.get("loggedIn")),
+                  "plan": j.get("subscriptionType") or j.get("authMethod")}
+        except json.JSONDecodeError:
+            st = {"installed": rc != -1, "connected": False, "plan": None}  # -1: claude not found
+        CACHE.update(claude_at=time.time(), claude=st)
+    return CACHE["claude"]
+
+
+def claude_login():
+    # a visible terminal window, because sign-in may ask the user to paste a code
+    if os.name == "nt":
+        args = ["cmd", "/c", "start", "Sign in to Claude", "cmd", "/k", "claude auth login"]
+    elif sys.platform == "darwin":
+        args = ["osascript", "-e", 'tell application "Terminal" to do script "claude auth login"',
+                "-e", 'tell application "Terminal" to activate']
+    else:
+        term = next((t for t in ("x-terminal-emulator", "gnome-terminal", "konsole", "xterm")
+                     if shutil.which(t)), None)
+        if not term:
+            raise OSError("no terminal app found. Open a terminal and run: claude auth login")
+        inner = ["sh", "-c", 'claude auth login; exec "${SHELL:-sh}"']
+        args = [term, "--", *inner] if term == "gnome-terminal" else [term, "-e", *inner]
+    subprocess.Popen(args)
+    CACHE.update(login_at=time.time(), claude_at=0)
+
+
 PULL = {}  # the one model download in progress: model, done, total (bytes), error
 
 
@@ -298,6 +334,11 @@ def setup_info():
                      "--format=csv,noheader,nounits"], timeout=10)
     m = re.match(r"\s*(.+?)\s*,\s*(\d+)", out)  # first GPU only
     gpu = {"name": m[1], "gb": round(int(m[2]) / 1024)} if m else None
+    if not gpu and sys.platform == "darwin" and platform.machine() == "arm64":
+        _, mem, _ = run(["sysctl", "-n", "hw.memsize"], timeout=10)
+        if mem.strip().isdigit():
+            # shortcut: macOS lets the GPU use about 2/3 of shared memory by default
+            gpu = {"name": "Apple chip (shared memory)", "gb": round(int(mem) / 2**30 * 2 / 3)}
     installed = ollama_models()
     return {"done": SETTINGS.exists(), "model": chosen_model(), "ollama": installed is not None,
             "installed": installed or [], "gpu": gpu, "recommended": recommend(gpu and gpu["gb"]),
@@ -346,8 +387,12 @@ def pick_folder():
 def stop_run():
     proc = RUN.get("proc")
     if proc and proc.poll() is None:
-        # Windows-only: kills the runner together with aider underneath it
-        run(["taskkill", "/T", "/F", "/PID", str(proc.pid)])
+        # kill the runner together with aider underneath it
+        if os.name == "nt":
+            run(["taskkill", "/T", "/F", "/PID", str(proc.pid)])
+        else:
+            os.killpg(proc.pid, signal.SIGKILL)  # the runner leads its own process group
+        proc.wait()
         project = RUN["project"]
         if git(project, "branch", "--show-current")[1].startswith("local-run/"):
             # shortcut: drops the interrupted attempt's edits to tracked files; a file it
@@ -394,7 +439,8 @@ class Handler(BaseHTTPRequestHandler):
                              for c in S["chats"].values()]
                 running = bool(RUN) and RUN["proc"].poll() is None
                 self.send({"chats": chats, "chat": view, "status": status(), "running": running,
-                           "setup": SETTINGS.exists(), "model": chosen_model()})
+                           "setup": SETTINGS.exists(), "model": chosen_model(),
+                           "claude": claude_status()})
             elif url.path == "/api/setup":
                 self.send(setup_info())
             elif url.path == "/api/plugins":
@@ -489,7 +535,8 @@ class Handler(BaseHTTPRequestHandler):
                     out = open(Path(plan).with_suffix(".out.txt"), "w", encoding="utf-8")
                     RUN.update(plan=plan, project=project, proc=subprocess.Popen(
                         [sys.executable, str(HERE / "runner.py"), plan],
-                        cwd=project, stdout=out, stderr=subprocess.STDOUT))
+                        cwd=project, stdout=out, stderr=subprocess.STDOUT,
+                        start_new_session=os.name != "nt"))  # lets Stop kill the whole group
                 self.send({"ok": True})
             elif url.path == "/api/setup":
                 model, installed = body["model"], ollama_models() or []
@@ -502,6 +549,9 @@ class Handler(BaseHTTPRequestHandler):
                     PULL.update(model=model, done=0, total=0)
                     threading.Thread(target=pull, args=(model,), daemon=True).start()
                 self.send(setup_info())
+            elif url.path == "/api/claude-login":
+                claude_login()
+                self.send({"ok": True})
             elif url.path == "/api/stop":
                 stop_run()
                 self.send({"ok": True})
@@ -520,7 +570,10 @@ def main():
             c["busy"] = False  # a Claude call cannot survive a restart
     print(f"Hybrid app: http://127.0.0.1:{PORT}   (Ctrl+C to stop)")
     try:
-        ThreadingHTTPServer(("127.0.0.1", PORT), Handler).serve_forever()
+        server = ThreadingHTTPServer(("127.0.0.1", PORT), Handler)
+        if "--open" in sys.argv:  # the double-click launchers pass this
+            webbrowser.open(f"http://127.0.0.1:{PORT}")
+        server.serve_forever()
     except KeyboardInterrupt:
         stop_run()
 

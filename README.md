@@ -6,7 +6,8 @@ Claude writes the tests and a plan of small tasks. A local Ollama model (through
 the edits, one task at a time, each in a fresh context. A task only counts as done when its
 check command passes, so the local model never has to drive tools or judge its own work.
 
-Built and tested on Windows with a GTX 1080 Ti (11 GB) and `qwen3.5:9b`.
+Built and tested on Windows with a GTX 1080 Ti (11 GB) and `qwen3.5:9b`. It also runs on macOS
+and Linux; those have not been tested yet.
 
 ## Requirements
 
@@ -17,13 +18,14 @@ Built and tested on Windows with a GTX 1080 Ti (11 GB) and `qwen3.5:9b`.
 
 ## The app
 
-Double-click **Start Hybrid.bat**, or run:
+Double-click **Start Hybrid.bat** (Windows) or **Start Hybrid.command** (macOS; the first time,
+right-click it and choose Open). On Linux run `./"Start Hybrid.command"`. Or run:
 
 ```
-uv run --python 3.12 hybrid_app.py
+uv run --python 3.12 hybrid_app.py --open
 ```
 
-Open http://127.0.0.1:8765. On first start the app checks your graphics card and recommends a
+The browser opens http://127.0.0.1:8765. On first start the app checks your graphics card and recommends a
 local model (downloading it if needed); change it later with **Change** next to the model name.
 Then start a chat, pick a project folder and describe what you want.
 
@@ -55,5 +57,6 @@ exactly as written, so only run plans you trust.
 ## Limits
 
 - The local model handles small, precisely specified tasks. Planning and review need Claude.
-- Stopping a run and killing aider uses `taskkill`, so the Stop button is Windows-only.
+- Model recommendations read GPU memory from NVIDIA cards and Apple Silicon Macs. Other GPUs
+  (AMD, Intel) are treated as no GPU, so the setup suggests the smallest model.
 - One run at a time, and no resume: after a partial run, ask for a new plan.
