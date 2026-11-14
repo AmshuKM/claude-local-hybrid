@@ -1,10 +1,14 @@
 # Claude + local model hybrid
 
+[![tests](https://github.com/AmshuKM/claude-local-hybrid/actions/workflows/tests.yml/badge.svg)](https://github.com/AmshuKM/claude-local-hybrid/actions/workflows/tests.yml) [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+
 Plan coding work with Claude, then run it on a small local model on your own GPU.
 
 Claude writes the tests and a plan of small tasks. A local Ollama model (through aider) makes
 the edits, one task at a time, each in a fresh context. A task only counts as done when its
 check command passes, so the local model never has to drive tools or judge its own work.
+
+![The Hybrid app: Claude's plan card with four tasks, all passed on the local GPU](docs/screenshot.png)
 
 Built and tested on Windows with a GTX 1080 Ti (11 GB) and `qwen3.5:9b`. Also tested on Linux
 (Ubuntu 26.04, GNOME) with a GTX 1660 SUPER (6 GB) and `qwen3.5:4b`: the launcher, model setup,
@@ -61,3 +65,15 @@ exactly as written, so only run plans you trust.
 - Model recommendations read GPU memory from NVIDIA cards and Apple Silicon Macs. Other GPUs
   (AMD, Intel) are treated as no GPU, so the setup suggests the smallest model.
 - One run at a time, and no resume: after a partial run, ask for a new plan.
+
+## Tests
+
+```
+uv run --python 3.12 --with pytest pytest -q test_hybrid_app.py
+```
+
+They need no model, no GPU and no network.
+
+## License
+
+[MIT](LICENSE)
