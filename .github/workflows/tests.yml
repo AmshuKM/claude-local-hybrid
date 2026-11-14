@@ -1,0 +1,28 @@
+name: tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    name: tests (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+      - name: Unit tests (no model, no network)
+        run: uv run --python 3.12 --with pytest pytest -q test_hybrid_app.py
+      - name: Runner validates a plan without running it
+        shell: bash
+        run: |
+          git config --global user.email ci@example.com
+          git config --global user.name ci
+          mkdir demo && cd demo && git init -q && git commit -q --allow-empty -m init
+          echo '{"tasks":[{"id":"t1","task":"noop","files":["a.txt"],"check":"git --version"}]}' > ../plan.json
+          python ../runner.py ../plan.json --dry-run
